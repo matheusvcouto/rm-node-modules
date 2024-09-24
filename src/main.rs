@@ -13,25 +13,28 @@ fn main() -> std::io::Result<()> {
 
     if current_dir != home_dir {
         let stats = calculate_node_modules_stats(&current_dir)?;
+        if stats.count != 0 {
+            println!("Found {} node_modules directories", stats.count);
+            println!(
+                "Total size: {:.2} MB / {:.2} GB",
+                stats.size as f64 / 1_048_576.0,
+                stats.size as f64 / 1_073_741_824.0
+            );
 
-        println!("Found {} node_modules directories", stats.count);
-        println!(
-            "Total size: {:.2} MB / {:.2} GB",
-            stats.size as f64 / 1_048_576.0,
-            stats.size as f64 / 1_073_741_824.0
-        );
+            print!("Do you want to delete these directories? (y/n): ");
+            io::stdout().flush()?;
 
-        print!("Do you want to delete these directories? (y/n): ");
-        io::stdout().flush()?;
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        if input.trim().to_lowercase() == "y" {
-            delete_node_modules(&current_dir)?;
-            println!("Process completed. All node_modules directories have been deleted.");
+            if input.trim().to_lowercase() == "y" {
+                delete_node_modules(&current_dir)?;
+                println!("Process completed. All node_modules directories have been deleted.");
+            } else {
+                println!("Operation cancelled. No directories were deleted.");
+            }
         } else {
-            println!("Operation cancelled. No directories were deleted.");
+            println!("no directory node_modules found")
         }
     } else {
         println!("Cannot execute in the home directory. This operation is restricted for safety reasons to prevent accidental deletion of important files.");
