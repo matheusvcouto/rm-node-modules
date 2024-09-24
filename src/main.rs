@@ -1,6 +1,6 @@
 use std::fs;
-use std::path::Path;
 use std::io::{self, Write};
+use std::path::Path;
 
 struct DirStats {
     size: u64,
@@ -9,22 +9,32 @@ struct DirStats {
 
 fn main() -> std::io::Result<()> {
     let current_dir = std::env::current_dir()?;
-    let stats = calculate_node_modules_stats(&current_dir)?;
-    
-    println!("Encontrados {} diretórios node_modules", stats.count);
-    println!("Tamanho total: {:.2} MB / {:.2} GB", stats.size as f64 / 1_048_576.0, stats.size as f64 / 1_073_741_824.0);
+    let home_dir = home::home_dir().unwrap();
 
-    print!("Deseja apagar estes diretórios? (s/n): ");
-    io::stdout().flush()?;
+    if current_dir != home_dir {
+        let stats = calculate_node_modules_stats(&current_dir)?;
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+        println!("Found {} node_modules directories", stats.count);
+        println!(
+            "Total size: {:.2} MB / {:.2} GB",
+            stats.size as f64 / 1_048_576.0,
+            stats.size as f64 / 1_073_741_824.0
+        );
 
-    if input.trim().to_lowercase() == "s" {
-        delete_node_modules(&current_dir)?;
-        println!("Processo concluído. Todos os diretórios node_modules foram apagados.");
+        print!("Do you want to delete these directories? (y/n): ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        if input.trim().to_lowercase() == "y" {
+            delete_node_modules(&current_dir)?;
+            println!("Process completed. All node_modules directories have been deleted.");
+        } else {
+            println!("Operation cancelled. No directories were deleted.");
+        }
     } else {
-        println!("Operação cancelada. Nenhum diretório foi apagado.");
+        println!("Cannot execute in the home directory. This operation is restricted for safety reasons to prevent accidental deletion of important files.");
     }
 
     Ok(())
@@ -37,13 +47,17 @@ fn calculate_node_modules_stats(dir: &Path) -> std::io::Result<DirStats> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.is_dir() {
                 if path.file_name().unwrap() == "node_modules" {
                     let dir_size = calculate_dir_size(&path)?;
                     stats.size += dir_size;
                     stats.count += 1;
-                    println!("Encontrado: {} ({:.2} MB)", path.display(), dir_size as f64 / 1_048_576.0);
+                    println!(
+                        "Found: {} ({:.2} MB)",
+                        path.display(),
+                        dir_size as f64 / 1_048_576.0
+                    );
                 } else {
                     let sub_stats = calculate_node_modules_stats(&path)?;
                     stats.size += sub_stats.size;
@@ -74,10 +88,10 @@ fn delete_node_modules(dir: &Path) -> std::io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.is_dir() {
                 if path.file_name().unwrap() == "node_modules" {
-                    println!("Apagando: {}", path.display());
+                    println!("Deleting: {}", path.display());
                     fs::remove_dir_all(&path)?;
                 } else {
                     delete_node_modules(&path)?;
