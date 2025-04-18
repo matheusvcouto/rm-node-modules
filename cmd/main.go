@@ -117,6 +117,7 @@ func main() {
 		return
 	}
 
+	startTime := time.Now()
 	// Canal para mostrar em tempo real os node_modules encontrados
 	foundChan := make(chan string)
 	// Canal para receber os node_modules encontrados
@@ -178,6 +179,8 @@ func main() {
 
 	foundWg.Wait()
 
+	totalTime := time.Since(startTime)
+
 	if len(nmDirs) == 0 {
 		fmt.Println("No node_modules directories found.")
 		fmt.Println()
@@ -188,6 +191,7 @@ func main() {
 	log.Separator("")
 	fmt.Printf("Total encontrados: %d\n", len(nmDirs))
 	fmt.Printf("Espaço total: %s / %.2f GB\n", formatSize(totalSize), float64(totalSize)/(1024*1024*1024))
+	fmt.Printf("Tempo de busca: %s\n", totalTime.Round(time.Millisecond))
 	log.Separator("")
 	fmt.Println() // Espaço extra para separar visualmente
 	fmt.Print("Deseja apagar esses diretórios? (y/n): ")
