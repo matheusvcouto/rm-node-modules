@@ -95,6 +95,28 @@ func main() {
 	fmt.Println()
 	log.Section("Busca e remoção de node_modules")
 	fmt.Println()
+
+	// Verificação para impedir execução na raiz do sistema operacional e no diretório home do usuário
+	startDir, _ := os.Getwd()
+	homeDir, _ := os.UserHomeDir()
+	isRoot := false
+	isHome := false
+	if startDir == string(os.PathSeparator) {
+		isRoot = true // Unix-like raiz
+	}
+	// Windows: verifica se está em C:\, D:\, etc
+	if len(startDir) == 3 && startDir[1] == ':' && (startDir[2] == '\\' || startDir[2] == '/') {
+		isRoot = true
+	}
+	// Verifica se está no diretório home do usuário
+	if startDir == homeDir {
+		isHome = true
+	}
+	if isRoot || isHome {
+		fmt.Println("[ERRO] Não é permitido executar este script no diretório raiz do sistema operacional nem no diretório home do usuário!")
+		return
+	}
+
 	// Canal para mostrar em tempo real os node_modules encontrados
 	foundChan := make(chan string)
 	// Canal para receber os node_modules encontrados
@@ -105,7 +127,6 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Envia diretório inicial
-	startDir, _ := os.Getwd()
 	if _, err := os.Stat(startDir); os.IsNotExist(err) {
 		fmt.Printf("Diretório inicial não existe: %s\n", startDir)
 		return
