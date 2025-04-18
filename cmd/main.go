@@ -13,13 +13,12 @@ import (
 )
 
 // Definições de constantes para configuração do script
-// Recomendado para computadores com 16GB de RAM:
 // - MAX_SEARCH_WORKERS: 10 (busca)
-// - MAX_DELETE_WORKERS: 5 (remoção)
+// - MAX_DELETE_WORKERS: 10 (remoção)
 // Se quiser ajustar para máquinas mais fracas, pode reduzir esses valores.
 const (
 	MAX_SEARCH_WORKERS int = 10  // Máximo de workers para busca de node_modules
-	MAX_DELETE_WORKERS int = 5   // Máximo de workers para remoção de node_modules
+	MAX_DELETE_WORKERS int = 10  // Máximo de workers para remoção de node_modules
 	RESULTS_BUFFER     int = 100 // Tamanho do buffer dos canais de resultados
 	JOBS_BUFFER        int = 100 // Tamanho do buffer dos canais de jobs
 )
