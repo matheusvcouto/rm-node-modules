@@ -1,23 +1,38 @@
-# rm_node_modules
+# rm-node-modules
 
-This Rust project scans the current directory and its subdirectories for `node_modules` folders, calculates their total size, and prompts the user to delete them.
+Este script em Go busca e apaga todas as pastas `node_modules` de um diretório e suas subpastas, de forma rápida, segura e eficiente.
 
-**pt-br:** Este projeto em Rust escaneia o diretório atual e suas subpastas em busca de pastas `node_modules`, calcula seu tamanho total e solicita ao usuário a exclusão delas.
+## Como funciona
 
-## Compilação
+- Procura por todas as pastas `node_modules` (exceto as que estão dentro de outras `node_modules`).
+- Mostra em tempo real cada pasta encontrada e o tamanho dela.
+- Exibe o total de espaço ocupado e pede confirmação antes de apagar.
+- Apaga as pastas em paralelo, mostrando em tempo real cada remoção.
+- Usa goroutines e workers para ser rápido e não travar o computador (máximo 10 para busca, 5 para remoção).
 
-Use o comando:
+## Como usar
 
-```bash
-cargo build --release
-```
+1. Compile o programa:
+   ```sh
+   go build -o rm-nm.exe
+   ```
+2. Execute na pasta que deseja limpar:
+   ```sh
+   ./rm-nm.exe
+   ```
+3. Siga as instruções no terminal.
 
-## Configuração no Fish Shell
+## Segurança
 
-Adicione o caminho do binário ao seu `PATH` no Fish shell:
+- O script nunca apaga nada sem pedir confirmação.
+- Não entra em pastas `node_modules` dentro de outras `node_modules`.
+- Usa boas práticas de concorrência e gerenciamento de memória.
 
-```fish
-set -g PATH $PATH $HOME/scripts/rm_node_modules/target/release/
-```
+## Requisitos
 
-**Obs:** O binário é encontrado automaticamente e é usado o nome do projeto para executá-lo
+- Go 1.18 ou superior
+- Windows, Linux ou Mac
+
+---
+
+> Use por sua conta e risco. Sempre confira o que será apagado antes de confirmar!

@@ -1,7 +1,0 @@
-[package]
-name = "rm_node_modules"
-version = "0.1.1"
-edition = "2021"
-
-[dependencies]
-home = "0.5.9"

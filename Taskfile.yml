@@ -1,0 +1,29 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  MAIN_PATH: ./cmd/main.go
+
+tasks:
+  build:
+    desc: Build the project
+    cmds:
+      - go build -o bin/cli {{.MAIN_PATH}}
+
+  build-windows:
+    desc: Build the project for Windows
+    aliases:
+      - build:windows
+      - build:win
+    cmds:
+      - GOOS=windows GOARCH=amd64 go build -o bin/cli.exe {{.MAIN_PATH}}
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -count=1 ./...
+  dev:
+    desc: Run the project in development mode
+    cmds:
+      - go run {{.MAIN_PATH}}

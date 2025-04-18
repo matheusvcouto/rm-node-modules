@@ -1,1 +1,14 @@
-/target
+*
+!*.go
+!go.mod
+!.gitignore
+!README.md
+!Taskfile.yml
+
+# folders of projects
+!tests
+!tests/*
+!cmd
+!cmd/*
+!lib
+!lib/*
