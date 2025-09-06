@@ -36,6 +36,7 @@ func walkDirs(root string, jobs chan<- string) {
 		stack = stack[:len(stack)-1]
 		entries, err := os.ReadDir(dir)
 		if err != nil {
+			log.Error(dir, err)
 			continue
 		}
 		for _, entry := range entries {
@@ -58,20 +59,23 @@ func walkDirs(root string, jobs chan<- string) {
 }
 
 // Calcula o tamanho total de um diretório de forma segura
-func dirSize(path string) int64 {
+func dirSize(path string) (int64, error) {
 	var size int64
-	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
 			size += info.Size()
 		}
 		return nil
 	})
-	return size
+	return size, err
 }
 
 // worker para remoção de node_modules
 // O parâmetro id foi removido pois não era utilizado
-func deleteWorker(jobs <-chan nodeModulesDir, wg *sync.WaitGroup, deleted chan<- string) {
+func deleteWorker(jobs <-chan nodeModulesDir, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for dir := range jobs {
@@ -81,11 +85,9 @@ func deleteWorker(jobs <-chan nodeModulesDir, wg *sync.WaitGroup, deleted chan<-
 
 		if err != nil {
 			log.Error(dir.path, err)
-			deleted <- fmt.Sprintf("[ERRO] %s: %v", dir.path, err)
 		} else {
 			elapsed := time.Since(start)
 			log.Deleted(dir.path, formatSize(dir.size), elapsed)
-			deleted <- fmt.Sprintf("Deleted: %s (%s, took %s)", dir.path, formatSize(dir.size), elapsed.Round(time.Millisecond))
 		}
 	}
 }
@@ -96,8 +98,16 @@ func main() {
 	fmt.Println()
 
 	// Verificação para impedir execução na raiz do sistema operacional e no diretório home do usuário
-	startDir, _ := os.Getwd()
-	homeDir, _ := os.UserHomeDir()
+	startDir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("[ERRO] Não foi possível obter o diretório atual: %v\n", err)
+		return
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Printf("[ERRO] Não foi possível obter o diretório home do usuário: %v\n", err)
+		return
+	}
 	isRoot := false
 	isHome := false
 	if startDir == string(os.PathSeparator) {
@@ -117,8 +127,6 @@ func main() {
 	}
 
 	startTime := time.Now()
-	// Canal para mostrar em tempo real os node_modules encontrados
-	foundChan := make(chan string)
 	// Canal para receber os node_modules encontrados
 	results := make(chan nodeModulesDir, RESULTS_BUFFER)
 	// Canal de jobs para busca
@@ -138,34 +146,27 @@ func main() {
 	}()
 
 	// Inicia workers de busca
-	for i := range MAX_SEARCH_WORKERS {
+	for range MAX_SEARCH_WORKERS {
 		wg.Add(1)
-		go func(id int) {
+		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				size := dirSize(path)
+				size, err := dirSize(path)
+				if err != nil {
+					log.Error(path, err)
+					// Não adiciona ao canal de resultados se houver erro
+					continue
+				}
 				results <- nodeModulesDir{path, size}
 				log.Found(path, formatSize(size))
-				foundChan <- fmt.Sprintf("Found: %s (%s)", path, formatSize(size))
 			}
-		}(i)
+		}()
 	}
-
-	// Goroutine para mostrar em tempo real os encontrados
-	var foundWg sync.WaitGroup
-	foundWg.Add(1)
-	go func() {
-		defer foundWg.Done()
-		for msg := range foundChan {
-			fmt.Println(msg) // substitua por printFound se quiser customizar ainda mais
-		}
-	}()
 
 	// Outra goroutine para fechar results depois que jobs for fechado
 	go func() {
 		wg.Wait()
 		close(results)
-		close(foundChan)
 	}()
 
 	// Coleta todos os node_modules encontrados
@@ -175,8 +176,6 @@ func main() {
 		nmDirs = append(nmDirs, dir)
 		totalSize += dir.size
 	}
-
-	foundWg.Wait()
 
 	totalTime := time.Since(startTime)
 
@@ -207,27 +206,13 @@ func main() {
 	log.Section("Remoção de node_modules")
 	fmt.Println() // Espaço extra para separar visualmente
 
-	// Canal para mostrar em tempo real os deletados
-	deletedChan := make(chan string)
 	// Canal de jobs para deleção
 	deleteJobs := make(chan nodeModulesDir, MAX_DELETE_WORKERS)
 	var delWg sync.WaitGroup
 	for i := 0; i < MAX_DELETE_WORKERS; i++ {
 		delWg.Add(1)
-		go deleteWorker(deleteJobs, &delWg, deletedChan)
+		go deleteWorker(deleteJobs, &delWg)
 	}
-
-	// Goroutine para mostrar em tempo real os deletados
-	// O canal deletedChan só é fechado após todos os workers terminarem,
-	// garantindo que não haverá envio para canal fechado.
-	var deletedWg sync.WaitGroup
-	deletedWg.Add(1)
-	go func() {
-		defer deletedWg.Done()
-		for msg := range deletedChan {
-			fmt.Println(msg) // substitua por printDeleted/printError se quiser customizar ainda mais
-		}
-	}()
 
 	// Envia jobs de deleção
 	for _, dir := range nmDirs {
@@ -235,8 +220,6 @@ func main() {
 	}
 	close(deleteJobs)
 	delWg.Wait()
-	close(deletedChan)
-	deletedWg.Wait()
 	fmt.Println()
 	log.Section("Limpeza concluída!")
 	fmt.Println()

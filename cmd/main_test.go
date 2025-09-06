@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -26,7 +25,10 @@ func TestDirSize(t *testing.T) {
 	}
 
 	// Verifica se o tamanho calculado está correto
-	size := dirSize(tmpDir)
+	size, err := dirSize(tmpDir)
+	if err != nil {
+		t.Errorf("dirSize retornou um erro inesperado: %v", err)
+	}
 	if size != int64(len(testData)) {
 		t.Errorf("Tamanho calculado incorreto: esperado %d, obtido %d", len(testData), size)
 	}
@@ -54,8 +56,9 @@ func TestFormatSize(t *testing.T) {
 	}
 }
 
-// TestSearchWorker verifica se a função searchWorker funciona corretamente
-func TestSearchWorker(t *testing.T) {
+// TestWalkAndSearch verifica se a busca de diretórios e o cálculo de tamanho
+// funcionam corretamente em conjunto.
+func TestWalkAndSearch(t *testing.T) {
 	// Estrutura de teste
 	// tmp/
 	//   - node_modules/
@@ -111,91 +114,53 @@ func TestSearchWorker(t *testing.T) {
 		t.Fatalf("Erro ao criar arquivo de teste: %v", err)
 	}
 
-	// Não usamos mais searchWorker, pois a busca agora é feita pelo walkDirs no main
-	// Vamos simular a busca como no main.go
 	jobs := make(chan string, 10)
 	results := make(chan nodeModulesDir, 10)
-	found := make(chan string, 10)
 	var wg sync.WaitGroup
 	maxWorkers := 2
 
 	// Inicia workers de busca
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
-		go func(id int) {
+		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				size := dirSize(path)
+				size, err := dirSize(path)
+				if err != nil {
+					t.Errorf("dirSize failed for %s: %v", path, err)
+				}
 				results <- nodeModulesDir{path, size}
-				found <- path // só para consumir
 			}
-		}(i)
+		}()
 	}
 
-	// Busca recursiva controlada pelo teste
+	// Roda a função de busca
 	go func() {
-		stack := []string{tmpDir}
-		for len(stack) > 0 {
-			dir := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				name := entry.Name()
-				fullPath := filepath.Join(dir, name)
-				if name == "node_modules" {
-					// Só adiciona se não houver outro node_modules no caminho
-					if strings.Count(fullPath, string(os.PathSeparator)+"node_modules") > 1 {
-						continue
-					}
-					jobs <- fullPath
-					continue
-				}
-				stack = append(stack, fullPath)
-			}
-		}
+		walkDirs(tmpDir, jobs)
 		close(jobs)
 	}()
 
 	// Coleta resultados
-	foundDirs := make([]nodeModulesDir, 0)
-	expectedCount := 2 // Esperamos encontrar 2 diretórios node_modules
-
+	foundDirs := make(map[string]int64)
 	go func() {
 		wg.Wait()
 		close(results)
-		close(found)
 	}()
 
 	for dir := range results {
-		foundDirs = append(foundDirs, dir)
+		foundDirs[dir.path] = dir.size
 	}
 
+	expectedCount := 2 // Esperamos encontrar 2 diretórios node_modules
 	if len(foundDirs) != expectedCount {
 		t.Errorf("Quantidade incorreta de node_modules encontrados: esperado %d, obtido %d", expectedCount, len(foundDirs))
 	}
 
-	foundPaths := make(map[string]bool)
-	for _, dir := range foundDirs {
-		dirName := filepath.Base(filepath.Dir(dir.path))
-		foundPaths[dirName] = true
+	if size, ok := foundDirs[nm1]; !ok || size != 17 { // 10 bytes for dummy.txt + 7 bytes for ignored.txt in nested dir
+		t.Errorf("Diretório %s não encontrado ou com tamanho incorreto. Encontrado: %t, Tamanho: %d", nm1, ok, size)
 	}
-
-	tmpBase := filepath.Base(tmpDir)
-	expectedPaths := map[string]bool{
-		tmpBase:  true,
-		"subdir": true,
-	}
-
-	for path := range expectedPaths {
-		if !foundPaths[path] {
-			t.Errorf("Diretório esperado não encontrado: %s", path)
-		}
+	if size, ok := foundDirs[nm2]; !ok || size != 20 {
+		t.Errorf("Diretório %s não encontrado ou com tamanho incorreto. Encontrado: %t, Tamanho: %d", nm2, ok, size)
 	}
 }
 
@@ -224,12 +189,11 @@ func TestDeleteWorker(t *testing.T) {
 
 	// Canais para teste
 	jobs := make(chan nodeModulesDir, 1)
-	deleted := make(chan string, 1)
 	var wg sync.WaitGroup
 
 	// Inicia worker
 	wg.Add(1)
-	go deleteWorker(jobs, &wg, deleted)
+	go deleteWorker(jobs, &wg)
 
 	// Envia job para deletar o diretório
 	jobs <- nodeModulesDir{testNM, 4}
@@ -237,7 +201,6 @@ func TestDeleteWorker(t *testing.T) {
 
 	// Aguarda worker terminar
 	wg.Wait()
-	close(deleted)
 
 	// Verifica se o diretório foi deletado
 	if _, err := os.Stat(testNM); !os.IsNotExist(err) {
@@ -245,7 +208,7 @@ func TestDeleteWorker(t *testing.T) {
 	}
 }
 
-// TestIntegration executa um teste de integração simulando o fluxo completo
+// TestIntegration executa um teste de integração simulando o fluxo completo de busca.
 func TestIntegration(t *testing.T) {
 	// Pula teste de integração quando executando em CI/CD
 	if os.Getenv("CI") == "true" {
@@ -259,19 +222,21 @@ func TestIntegration(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Cria vários níveis de diretórios com node_modules
-	dirs := []string{
-		filepath.Join(tmpDir, "dir1", "node_modules"),
-		filepath.Join(tmpDir, "dir2", "subdir", "node_modules"),
-		filepath.Join(tmpDir, "dir3", "node_modules", "pkg", "node_modules"), // Este deve ser ignorado
-	}
+	// Cria vários níveis de diretórios com node_modules.
+	// O diretório aninhado (em dir3/node_modules/pkg/node_modules) deve ser ignorado.
+	topLevelNM1 := filepath.Join(tmpDir, "dir1", "node_modules")
+	topLevelNM2 := filepath.Join(tmpDir, "dir2", "subdir", "node_modules")
+	topLevelNM3 := filepath.Join(tmpDir, "dir3", "node_modules")
+	nestedNM := filepath.Join(topLevelNM3, "pkg", "node_modules")
 
-	for _, dir := range dirs {
+	dirsToCreate := []string{topLevelNM1, topLevelNM2, nestedNM}
+
+	for _, dir := range dirsToCreate {
 		err = os.MkdirAll(dir, 0755)
 		if err != nil {
 			t.Fatalf("Erro ao criar diretório de teste: %v", err)
 		}
-		// Cria um arquivo em cada diretório
+		// Cria um arquivo em cada diretório para ter um tamanho > 0
 		err = os.WriteFile(filepath.Join(dir, "testfile.txt"), []byte("test"), 0644)
 		if err != nil {
 			t.Fatalf("Erro ao criar arquivo de teste: %v", err)
@@ -286,61 +251,55 @@ func TestIntegration(t *testing.T) {
 	// Inicia workers de busca
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
-		go func(id int) {
+		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				size := dirSize(path)
+				size, err := dirSize(path)
+				if err != nil {
+					t.Errorf("dirSize failed for %s: %v", path, err)
+				}
 				results <- nodeModulesDir{path, size}
 			}
-		}(i)
+		}()
 	}
 
-	// Busca recursiva controlada pelo teste
+	// Roda a função de busca
 	go func() {
-		stack := []string{tmpDir}
-		for len(stack) > 0 {
-			dir := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				name := entry.Name()
-				fullPath := filepath.Join(dir, name)
-				if name == "node_modules" {
-					// Só adiciona se não houver outro node_modules no caminho
-					if strings.Count(fullPath, string(os.PathSeparator)+"node_modules") > 1 {
-						continue
-					}
-					jobs <- fullPath
-					continue
-				}
-				stack = append(stack, fullPath)
-			}
-		}
+		walkDirs(tmpDir, jobs)
 		close(jobs)
 	}()
 
 	// Coleta resultados
-	nmDirs := make([]nodeModulesDir, 0)
+	foundDirs := make(map[string]bool)
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 	for dir := range results {
-		nmDirs = append(nmDirs, dir)
+		foundDirs[dir.path] = true
 	}
 
-	// Verifica se encontrou o número correto de diretórios
-	expectedCount := 3 // Agora espera 3 node_modules (os aninhados são ignorados)
-	if len(nmDirs) != expectedCount {
-		t.Errorf("Quantidade incorreta de node_modules encontrados: esperado %d, obtido %d", expectedCount, len(nmDirs))
-		for i, dir := range nmDirs {
-			t.Logf("Dir %d: %s", i+1, dir.path)
+	// Verifica se encontrou o número correto de diretórios.
+	// Apenas os 3 node_modules de nível superior devem ser encontrados.
+	expectedCount := 3
+	if len(foundDirs) != expectedCount {
+		t.Errorf("Quantidade incorreta de node_modules encontrados: esperado %d, obtido %d", expectedCount, len(foundDirs))
+		for path := range foundDirs {
+			t.Logf("Encontrado: %s", path)
 		}
+	}
+
+	// Verifica se os diretórios corretos foram encontrados
+	if !foundDirs[topLevelNM1] {
+		t.Errorf("Diretório esperado não encontrado: %s", topLevelNM1)
+	}
+	if !foundDirs[topLevelNM2] {
+		t.Errorf("Diretório esperado não encontrado: %s", topLevelNM2)
+	}
+	if !foundDirs[topLevelNM3] {
+		t.Errorf("Diretório esperado não encontrado: %s", topLevelNM3)
+	}
+	if foundDirs[nestedNM] {
+		t.Errorf("Diretório aninhado foi encontrado indevidamente: %s", nestedNM)
 	}
 }
